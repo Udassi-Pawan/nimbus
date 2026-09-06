@@ -12,6 +12,9 @@ import (
 
 	"github.com/Udassi-Pawan/nimbus/internal/config"
 	"github.com/Udassi-Pawan/nimbus/internal/store"
+
+	"github.com/Udassi-Pawan/nimbus/internal/api"
+	"github.com/Udassi-Pawan/nimbus/internal/auth"
 )
 
 func main() {
@@ -35,7 +38,12 @@ func main() {
 	}
 	defer st.Close()
 
+	authService := auth.NewService(cfg.JWTSecret)
+	apiServer := api.NewServer(st, authService)
+
 	mux := http.NewServeMux()
+
+	mux.Handle("/api/", apiServer.Router())  // note: /api/ prefix match
 
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
