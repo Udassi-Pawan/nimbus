@@ -6,6 +6,9 @@ import (
 	"errors"
 	"fmt"
 
+	"encoding/json"
+	"github.com/jackc/pgx/v5"
+
 	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/jackc/pgx/v5/stdlib" // registers "pgx" driver for database/sql
 	"github.com/pressly/goose/v3"
@@ -150,4 +153,40 @@ func (s *Store) CreateService(ctx context.Context, input models.CreateServiceInp
 		return models.Service{}, fmt.Errorf("commit tx: %w", err)
 	}
 	return svc, nil
+}
+
+func (s *Store) GetUserByEmail(ctx context.Context, email string) (models.User, string, error) {
+	var user models.User
+	var passwordHash string
+
+	err := s.pool.QueryRow(ctx, `
+		SELECT id, email, name, password_hash, created_at
+		FROM users WHERE email = $1
+	`, email).Scan(&user.ID, &user.Email, &user.Name, &passwordHash, &user.CreatedAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return models.User{}, "", ErrNotFound
+		}
+		return models.User{}, "", fmt.Errorf("get user by email: %w", err)
+	}
+	return user, passwordHash, nil
+}
+
+func (s *Store) CreateAuditLog(ctx context.Context, actorUserID *string, action, resourceType, resourceID string, metadata map[string]any) error {
+	if metadata == nil {
+		metadata = map[string]any{}
+	}
+	payload, err := json.Marshal(metadata)
+	if err != nil {
+		return fmt.Errorf("marshal metadata: %w", err)
+	}
+
+	_, err = s.pool.Exec(ctx, `
+		INSERT INTO audit_logs (actor_user_id, action, resource_type, resource_id, metadata)
+		VALUES ($1, $2, $3, $4, $5)
+	`, actorUserID, action, resourceType, resourceID, payload)
+	if err != nil {
+		return fmt.Errorf("insert audit log: %w", err)
+	}
+	return nil
 }

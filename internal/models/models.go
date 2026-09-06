@@ -54,3 +54,23 @@ type CreateServiceInput struct {
 	OwnerEmail    string   `json:"owner_email"`
 	Environments  []string `json:"environments"`
 }
+
+type LoginInput struct {
+	Email    string `json:"email"`
+	Password string `json:"password"`
+}
+
+type LoginResponse struct {
+	Token string `json:"token"`
+	User  User   `json:"user"`
+}
+
+type AuditLog struct {
+	ID           string         `json:"id"`
+	ActorUserID  *string        `json:"actor_user_id,omitempty"`
+	Action       string         `json:"action"`
+	ResourceType string         `json:"resource_type"`
+	ResourceID   string         `json:"resource_id"`
+	Metadata     map[string]any `json:"metadata"`
+	CreatedAt    time.Time      `json:"created_at"`
+}
