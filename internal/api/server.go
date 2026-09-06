@@ -36,7 +36,12 @@ func (s *Server) Router() http.Handler {
 
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Use(s.authMiddleware)
-		// Step 6 adds: services, teams, audit-logs here
+	
+		r.Get("/teams", s.handleListTeams)
+		r.Get("/services", s.handleListServices)
+		r.Post("/services", s.handleCreateService)
+		r.Get("/services/{id}", s.handleGetService)
+		r.Get("/audit-logs", s.handleListAuditLogs)
 	})
 
 	return r
@@ -58,6 +63,11 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 		ctx := context.WithValue(r.Context(), userClaimsKey, claims)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+func claimsFromContext(ctx context.Context) (*auth.Claims, bool) {
+	claims, ok := ctx.Value(userClaimsKey).(*auth.Claims)
+	return claims, ok
 }
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
@@ -102,4 +112,78 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 
 func writeError(w http.ResponseWriter, status int, message string) {
 	writeJSON(w, status, map[string]string{"error": message})
+}
+
+func (s *Server) handleListTeams(w http.ResponseWriter, r *http.Request) {
+	teams, err := s.store.ListTeams(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list teams")
+		return
+	}
+	writeJSON(w, http.StatusOK, teams)
+}
+
+func (s *Server) handleListServices(w http.ResponseWriter, r *http.Request) {
+	services, err := s.store.ListServices(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list services")
+		return
+	}
+	writeJSON(w, http.StatusOK, services)
+}
+
+func (s *Server) handleGetService(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	svc, err := s.store.GetService(r.Context(), id)
+	if err != nil {
+		if err == store.ErrNotFound {
+			writeError(w, http.StatusNotFound, "service not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to get service")
+		return
+	}
+	writeJSON(w, http.StatusOK, svc)
+}
+
+func (s *Server) handleCreateService(w http.ResponseWriter, r *http.Request) {
+	var input models.CreateServiceInput
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid json body")
+		return
+	}
+
+	if input.Name == "" || input.Slug == "" || input.TeamID == "" {
+		writeError(w, http.StatusBadRequest, "name, slug, and team_id are required")
+		return
+	}
+
+	svc, err := s.store.CreateService(r.Context(), input)
+	if err != nil {
+		if err == store.ErrDuplicateSlug {
+			writeError(w, http.StatusConflict, "service slug already exists for team")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to create service")
+		return
+	}
+
+	if claims, ok := claimsFromContext(r.Context()); ok {
+		actorID := claims.UserID
+		_ = s.store.CreateAuditLog(r.Context(), &actorID, "service.create", "service", svc.ID, map[string]any{
+			"name": svc.Name,
+			"slug": svc.Slug,
+		})
+	}
+
+	writeJSON(w, http.StatusCreated, svc)
+}
+
+func (s *Server) handleListAuditLogs(w http.ResponseWriter, r *http.Request) {
+	logs, err := s.store.ListAuditLogs(r.Context(), 50)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list audit logs")
+		return
+	}
+	writeJSON(w, http.StatusOK, logs)
 }
