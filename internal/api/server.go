@@ -44,6 +44,7 @@ func (s *Server) Router() http.Handler {
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Use(s.authMiddleware)
 	
+		r.Post("/services/from-template", s.handleCreateFromTemplate)
 		r.Get("/teams", s.handleListTeams)
 		r.Get("/services", s.handleListServices)
 		r.Post("/services", s.handleCreateService)

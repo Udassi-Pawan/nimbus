@@ -39,7 +39,7 @@ func main() {
 	defer st.Close()
 
 	authService := auth.NewService(cfg.JWTSecret)
-	apiServer := api.NewServer(st, authService)
+	apiServer := api.NewServer(st, authService, cfg.GeneratedServicesDir)
 
 	mux := http.NewServeMux()
 

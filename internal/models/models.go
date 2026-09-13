@@ -74,3 +74,20 @@ type AuditLog struct {
 	Metadata     map[string]any `json:"metadata"`
 	CreatedAt    time.Time      `json:"created_at"`
 }
+
+type CreateFromTemplateInput struct {
+	TemplateID    string `json:"template_id"`
+	TeamID        string `json:"team_id"`
+	Name          string `json:"name"`
+	Slug          string `json:"slug"`
+	Description   string `json:"description"`
+	RepositoryURL string `json:"repository_url"`
+	OwnerEmail    string `json:"owner_email"`
+}
+
+type CreateFromTemplateResponse struct {
+	Service        Service        `json:"service"`
+	GeneratedPath  string         `json:"generated_path"`
+	GeneratedFiles []string       `json:"generated_files"`
+	TemplateID     string         `json:"template_id"`
+}
