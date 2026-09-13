@@ -11,6 +11,7 @@ type Config struct {
 	LogLevel    string
 	DatabaseURL string
 	JWTSecret   string
+	GeneratedServicesDir string
 }
 
 func Load() (Config, error) {
@@ -21,6 +22,11 @@ func Load() (Config, error) {
 			return Config{}, fmt.Errorf("invalid NIMBUS_PORT: %w", err)
 		}
 		port = p
+	}
+
+	generatedDir := os.Getenv("NIMBUS_GENERATED_DIR")
+	if generatedDir == "" {
+		generatedDir = "generated"
 	}
 
 	dbURL := os.Getenv("DATABASE_URL")
@@ -43,5 +49,6 @@ func Load() (Config, error) {
 		LogLevel:    logLevel,
 		DatabaseURL: dbURL,
 		JWTSecret:   jwtSecret,
+		GeneratedServicesDir: generatedDir,
 	}, nil
 }
