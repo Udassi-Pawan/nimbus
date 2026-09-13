@@ -1,0 +1,19 @@
+replicaCount: 1
+image:
+  repository: {{ .Slug }}
+  tag: latest
+service:
+  port: 8080
+ingress:
+  enabled: true
+  host: {{ .Slug }}.local
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+probes:
+  livenessPath: /health
+  readinessPath: /health
