@@ -63,8 +63,7 @@ export default function ServicesPage() {
           </tr>
         </thead>
         <tbody>
-          {services.map(s => (
-            <tr key={s.id} style={{ borderBottom: '1px solid #eee' }}>
+        {(services ?? []).map(s => (            <tr key={s.id} style={{ borderBottom: '1px solid #eee' }}>
               <td>{s.name}</td>
               <td>{s.slug}</td>
               <td>{s.owner_email}</td>

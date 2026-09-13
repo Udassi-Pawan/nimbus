@@ -80,6 +80,9 @@ func (s *Store) ListTeams(ctx context.Context) ([]models.Team, error) {
 		}
 		teams = append(teams, t)
 	}
+	if teams == nil {
+		teams = []models.Team{}
+	}
 	return teams, rows.Err()
 }
 
@@ -105,6 +108,9 @@ func (s *Store) ListServices(ctx context.Context) ([]models.Service, error) {
 			return nil, fmt.Errorf("scan service: %w", err)
 		}
 		services = append(services, svc)
+	}
+	if services == nil {
+		services = []models.Service{}
 	}
 	return services, rows.Err()
 }
@@ -276,6 +282,9 @@ func (s *Store) ListAuditLogs(ctx context.Context, limit int) ([]models.AuditLog
 			return nil, fmt.Errorf("unmarshal metadata: %w", err)
 		}
 		logs = append(logs, log)
+	}
+	if logs == nil {
+		logs = []models.AuditLog{}
 	}
 	return logs, rows.Err()
 }

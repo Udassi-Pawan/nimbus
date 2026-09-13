@@ -83,9 +83,10 @@ export function login(email: string, password: string) {
   });
 }
 
-export function listServices() {
-  return request<Service[]>('/api/v1/services');
-}
+export async function listServices() {
+    const data = await request<Service[]>('/api/v1/services');
+    return data ?? [];
+  }
 
 export function getService(id: string) {
   return request<Service>(`/api/v1/services/${id}`);
@@ -105,6 +106,7 @@ export function createService(input: {
   });
 }
 
-export function listAuditLogs() {
-  return request<AuditLog[]>('/api/v1/audit-logs');
-}
+export async function listAuditLogs() {
+    const data = await request<AuditLog[]>('/api/v1/audit-logs');
+    return data ?? [];
+  }
