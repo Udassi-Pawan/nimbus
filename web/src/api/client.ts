@@ -110,3 +110,28 @@ export async function listAuditLogs() {
     const data = await request<AuditLog[]>('/api/v1/audit-logs');
     return data ?? [];
   }
+
+export type CreateFromTemplateResponse = {
+  service: Service;
+  generated_path: string;
+  generated_files: string[];
+  template_id: string;
+};
+
+export function createServiceFromTemplate(input: {
+    template_id?: string;
+    team_id: string;
+    name: string;
+    slug: string;
+    description?: string;
+    repository_url?: string;
+    owner_email?: string;
+  }) {
+    return request<CreateFromTemplateResponse>('/api/v1/services/from-template', {
+      method: 'POST',
+      body: JSON.stringify({
+        template_id: input.template_id ?? 'go-api',
+        ...input,
+      }),
+    });
+  }
