@@ -26,10 +26,13 @@ type fileMapping struct {
 	OutputPath   string
 }
 
-func GenerateGoAPI(baseOutputDir string, input ServiceTemplateInput) (GenerateResult, error) {
+func GenerateGoAPI(baseOutputDir, templateDir string, input ServiceTemplateInput) (GenerateResult, error) {
 	const templateID = "go-api"
-	templateDir := filepath.Join("templates", templateID)
 	outputDir := filepath.Join(baseOutputDir, input.Slug)
+
+	if _, err := os.Stat(templateDir); err != nil {
+		return GenerateResult{}, fmt.Errorf("template dir %s: %w", templateDir, err)
+	}
 
 	if err := os.MkdirAll(outputDir, 0o755); err != nil {
 		return GenerateResult{}, fmt.Errorf("create output dir: %w", err)

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -25,7 +26,8 @@ func main() {
 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 
-	if err := store.RunMigrations(cfg.DatabaseURL, "migrations"); err != nil {
+	migrationsDir := filepath.Join(cfg.RepoRoot, "migrations")
+	if err := store.RunMigrations(cfg.DatabaseURL, migrationsDir); err != nil {
 		logger.Error("migrations failed", "error", err)
 		os.Exit(1)
 	}
@@ -39,7 +41,7 @@ func main() {
 	defer st.Close()
 
 	authService := auth.NewService(cfg.JWTSecret)
-	apiServer := api.NewServer(st, authService, cfg.GeneratedServicesDir)
+	apiServer := api.NewServer(st, authService, cfg.GeneratedServicesDir, cfg.TemplatesDir)
 
 	mux := http.NewServeMux()
 
@@ -67,7 +69,12 @@ func main() {
 	server := &http.Server{Addr: addr, Handler: mux}
 
 	go func() {
-		logger.Info("nimbus control plane starting", "addr", addr)
+		logger.Info("nimbus control plane starting",
+			"addr", addr,
+			"repo_root", cfg.RepoRoot,
+			"templates_dir", cfg.TemplatesDir,
+			"generated_dir", cfg.GeneratedServicesDir,
+		)
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			logger.Error("server failed", "error", err)
 		 os.Exit(1)

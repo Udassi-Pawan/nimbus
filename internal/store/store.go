@@ -5,11 +5,10 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"strings"
 
 	"encoding/json"
 	"github.com/jackc/pgx/v5"
-
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/jackc/pgx/v5/stdlib" // registers "pgx" driver for database/sql
 	"github.com/pressly/goose/v3"
@@ -115,13 +114,15 @@ func (s *Store) ListServices(ctx context.Context) ([]models.Service, error) {
 	return services, rows.Err()
 }
 
+func isDuplicateKey(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505"
+}
+
 func (s *Store) CreateService(ctx context.Context, input models.CreateServiceInput) (models.Service, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		if strings.Contains(err.Error(), "duplicate key") {
-			return models.Service{}, ErrDuplicateSlug
-		}
-		return models.Service{}, fmt.Errorf("insert service: %w", err)
+		return models.Service{}, fmt.Errorf("begin tx: %w", err)
 	}
 	defer tx.Rollback(ctx)
 
@@ -136,6 +137,9 @@ func (s *Store) CreateService(ctx context.Context, input models.CreateServiceInp
 		&svc.CreatedAt, &svc.UpdatedAt,
 	)
 	if err != nil {
+		if isDuplicateKey(err) {
+			return models.Service{}, ErrDuplicateSlug
+		}
 		return models.Service{}, fmt.Errorf("insert service: %w", err)
 	}
 
@@ -155,6 +159,9 @@ func (s *Store) CreateService(ctx context.Context, input models.CreateServiceInp
 			&env.ID, &env.ServiceID, &env.Name, &env.Namespace, &env.CreatedAt,
 		)
 		if err != nil {
+			if isDuplicateKey(err) {
+				return models.Service{}, ErrDuplicateSlug
+			}
 			return models.Service{}, fmt.Errorf("insert environment: %w", err)
 		}
 		svc.Environments = append(svc.Environments, env)

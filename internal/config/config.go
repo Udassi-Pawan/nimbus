@@ -3,15 +3,20 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
+
+	"github.com/Udassi-Pawan/nimbus/internal/paths"
 )
 
 type Config struct {
-	Port        int
-	LogLevel    string
-	DatabaseURL string
-	JWTSecret   string
+	Port                 int
+	LogLevel             string
+	DatabaseURL          string
+	JWTSecret            string
+	RepoRoot             string
 	GeneratedServicesDir string
+	TemplatesDir         string
 }
 
 func Load() (Config, error) {
@@ -24,9 +29,26 @@ func Load() (Config, error) {
 		port = p
 	}
 
+	repoRoot := os.Getenv("NIMBUS_REPO_ROOT")
+	if repoRoot == "" {
+		var err error
+		repoRoot, err = paths.FindRepoRoot()
+		if err != nil {
+			return Config{}, fmt.Errorf("find repo root: %w", err)
+		}
+	}
+
 	generatedDir := os.Getenv("NIMBUS_GENERATED_DIR")
 	if generatedDir == "" {
 		generatedDir = "generated"
+	}
+	generatedDir = paths.ResolvePath(repoRoot, generatedDir)
+
+	templatesDir := os.Getenv("NIMBUS_TEMPLATES_DIR")
+	if templatesDir == "" {
+		templatesDir = filepath.Join(repoRoot, "templates", "go-api")
+	} else {
+		templatesDir = paths.ResolvePath(repoRoot, templatesDir)
 	}
 
 	dbURL := os.Getenv("DATABASE_URL")
@@ -45,10 +67,12 @@ func Load() (Config, error) {
 	}
 
 	return Config{
-		Port:        port,
-		LogLevel:    logLevel,
-		DatabaseURL: dbURL,
-		JWTSecret:   jwtSecret,
+		Port:                 port,
+		LogLevel:             logLevel,
+		DatabaseURL:          dbURL,
+		JWTSecret:            jwtSecret,
+		RepoRoot:             repoRoot,
 		GeneratedServicesDir: generatedDir,
+		TemplatesDir:         templatesDir,
 	}, nil
 }

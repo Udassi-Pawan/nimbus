@@ -98,8 +98,8 @@ export default function ServicesPage() {
       >
         <h3>Create Service</h3>
         <p style={{ marginTop: 0, color: '#555' }}>
-          Use <strong>Golden path</strong> to generate Dockerfile, Helm, and Kustomize files.
-          Use <strong>Catalog only</strong> if you only want the metadata row.
+          <strong>Golden path</strong> generates Dockerfile, Helm, Kustomize, CI stub.
+          <strong> Catalog only</strong> creates the metadata row.
         </p>
 
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>

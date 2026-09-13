@@ -3,15 +3,18 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 
-	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
-    "github.com/go-chi/cors"
 	"github.com/Udassi-Pawan/nimbus/internal/auth"
 	"github.com/Udassi-Pawan/nimbus/internal/models"
 	"github.com/Udassi-Pawan/nimbus/internal/store"
+	"github.com/Udassi-Pawan/nimbus/internal/templates"
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
+	"github.com/go-chi/cors"
 )
 
 type contextKey string
@@ -19,16 +22,24 @@ type contextKey string
 const userClaimsKey contextKey = "userClaims"
 
 type Server struct {
-	store *store.Store
-	auth  *auth.Service
+	store        *store.Store
+	auth         *auth.Service
+	generatedDir string
+	templatesDir string
 }
 
-func NewServer(st *store.Store, authService *auth.Service) *Server {
-	return &Server{store: st, auth: authService}
+func NewServer(st *store.Store, authService *auth.Service, generatedDir, templatesDir string) *Server {
+	return &Server{
+		store:        st,
+		auth:         authService,
+		generatedDir: generatedDir,
+		templatesDir: templatesDir,
+	}
 }
 
 func (s *Server) Router() http.Handler {
 	r := chi.NewRouter()
+
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   []string{"http://localhost:5173", "http://127.0.0.1:5173"},
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
@@ -36,6 +47,7 @@ func (s *Server) Router() http.Handler {
 		AllowCredentials: false,
 		MaxAge:           300,
 	}))
+
 	r.Use(middleware.RequestID)
 	r.Use(middleware.Recoverer)
 
@@ -43,11 +55,11 @@ func (s *Server) Router() http.Handler {
 
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Use(s.authMiddleware)
-	
-		r.Post("/services/from-template", s.handleCreateFromTemplate)
+
 		r.Get("/teams", s.handleListTeams)
 		r.Get("/services", s.handleListServices)
 		r.Post("/services", s.handleCreateService)
+		r.Post("/services/from-template", s.handleCreateFromTemplate)
 		r.Get("/services/{id}", s.handleGetService)
 		r.Get("/audit-logs", s.handleListAuditLogs)
 	})
@@ -62,12 +74,14 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 			writeError(w, http.StatusUnauthorized, "missing bearer token")
 			return
 		}
+
 		token := strings.TrimPrefix(header, "Bearer ")
 		claims, err := s.auth.ParseToken(token)
 		if err != nil {
 			writeError(w, http.StatusUnauthorized, "invalid token")
 			return
 		}
+
 		ctx := context.WithValue(r.Context(), userClaimsKey, claims)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
@@ -112,16 +126,6 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, models.LoginResponse{Token: token, User: user})
 }
 
-func writeJSON(w http.ResponseWriter, status int, payload any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(payload)
-}
-
-func writeError(w http.ResponseWriter, status int, message string) {
-	writeJSON(w, status, map[string]string{"error": message})
-}
-
 func (s *Server) handleListTeams(w http.ResponseWriter, r *http.Request) {
 	teams, err := s.store.ListTeams(r.Context())
 	if err != nil {
@@ -142,6 +146,7 @@ func (s *Server) handleListServices(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleGetService(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
+
 	svc, err := s.store.GetService(r.Context(), id)
 	if err != nil {
 		if err == store.ErrNotFound {
@@ -151,6 +156,7 @@ func (s *Server) handleGetService(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to get service")
 		return
 	}
+
 	writeJSON(w, http.StatusOK, svc)
 }
 
@@ -187,6 +193,76 @@ func (s *Server) handleCreateService(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, svc)
 }
 
+func (s *Server) handleCreateFromTemplate(w http.ResponseWriter, r *http.Request) {
+	var input models.CreateFromTemplateInput
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid json body")
+		return
+	}
+
+	if input.Name == "" || input.Slug == "" || input.TeamID == "" {
+		writeError(w, http.StatusBadRequest, "name, slug, and team_id are required")
+		return
+	}
+
+	templateID := input.TemplateID
+	if templateID == "" {
+		templateID = "go-api"
+	}
+
+	if templateID != "go-api" {
+		writeError(w, http.StatusBadRequest, "unsupported template_id")
+		return
+	}
+
+	generated, err := templates.GenerateGoAPI(s.generatedDir, s.templatesDir, templates.ServiceTemplateInput{
+		Name:          input.Name,
+		Slug:          input.Slug,
+		Description:   input.Description,
+		RepositoryURL: input.RepositoryURL,
+		OwnerEmail:    input.OwnerEmail,
+	})
+	if err != nil {
+		slog.Error("template generation failed", "error", err, "templates_dir", s.templatesDir)
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to generate template files: %v", err))
+		return
+	}
+
+	svc, err := s.store.CreateService(r.Context(), models.CreateServiceInput{
+		TeamID:        input.TeamID,
+		Name:          input.Name,
+		Slug:          input.Slug,
+		Description:   input.Description,
+		RepositoryURL: input.RepositoryURL,
+		OwnerEmail:    input.OwnerEmail,
+	})
+	if err != nil {
+		if err == store.ErrDuplicateSlug {
+			writeError(w, http.StatusConflict, "service slug already exists for team")
+			return
+		}
+		slog.Error("create service from template failed", "error", err, "slug", input.Slug)
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to create service: %v", err))
+		return
+	}
+
+	if claims, ok := claimsFromContext(r.Context()); ok {
+		actorID := claims.UserID
+		_ = s.store.CreateAuditLog(r.Context(), &actorID, "service.template.create", "service", svc.ID, map[string]any{
+			"template_id":    templateID,
+			"generated_path": generated.OutputPath,
+			"slug":           svc.Slug,
+		})
+	}
+
+	writeJSON(w, http.StatusCreated, models.CreateFromTemplateResponse{
+		Service:        svc,
+		GeneratedPath:  generated.OutputPath,
+		GeneratedFiles: generated.Files,
+		TemplateID:     generated.TemplateID,
+	})
+}
+
 func (s *Server) handleListAuditLogs(w http.ResponseWriter, r *http.Request) {
 	logs, err := s.store.ListAuditLogs(r.Context(), 50)
 	if err != nil {
@@ -194,4 +270,14 @@ func (s *Server) handleListAuditLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, logs)
+}
+
+func writeJSON(w http.ResponseWriter, status int, payload any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(payload)
+}
+
+func writeError(w http.ResponseWriter, status int, message string) {
+	writeJSON(w, status, map[string]string{"error": message})
 }

@@ -111,14 +111,14 @@ export async function listAuditLogs() {
     return data ?? [];
   }
 
-export type CreateFromTemplateResponse = {
-  service: Service;
-  generated_path: string;
-  generated_files: string[];
-  template_id: string;
-};
-
-export function createServiceFromTemplate(input: {
+  export type CreateFromTemplateResponse = {
+    service: Service;
+    generated_path: string;
+    generated_files: string[];
+    template_id: string;
+  };
+  
+  export function createServiceFromTemplate(input: {
     template_id?: string;
     team_id: string;
     name: string;
@@ -131,7 +131,12 @@ export function createServiceFromTemplate(input: {
       method: 'POST',
       body: JSON.stringify({
         template_id: input.template_id ?? 'go-api',
-        ...input,
+        team_id: input.team_id,
+        name: input.name,
+        slug: input.slug,
+        description: input.description ?? '',
+        repository_url: input.repository_url ?? '',
+        owner_email: input.owner_email ?? '',
       }),
     });
   }
