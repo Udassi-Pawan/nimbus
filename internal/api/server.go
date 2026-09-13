@@ -8,7 +8,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
-
+    "github.com/go-chi/cors"
 	"github.com/Udassi-Pawan/nimbus/internal/auth"
 	"github.com/Udassi-Pawan/nimbus/internal/models"
 	"github.com/Udassi-Pawan/nimbus/internal/store"
@@ -29,6 +29,13 @@ func NewServer(st *store.Store, authService *auth.Service) *Server {
 
 func (s *Server) Router() http.Handler {
 	r := chi.NewRouter()
+	r.Use(cors.Handler(cors.Options{
+		AllowedOrigins:   []string{"http://localhost:5173", "http://127.0.0.1:5173"},
+		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type"},
+		AllowCredentials: false,
+		MaxAge:           300,
+	}))
 	r.Use(middleware.RequestID)
 	r.Use(middleware.Recoverer)
 
