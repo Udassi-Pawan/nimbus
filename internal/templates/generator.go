@@ -45,6 +45,8 @@ func GenerateGoAPI(baseOutputDir, templateDir string, input ServiceTemplateInput
 		{"helm/Chart.yaml.tmpl", "helm/Chart.yaml"},
 		{"helm/values.yaml.tmpl", "helm/values.yaml"},
 		{"helm/deployment.yaml.tmpl", "helm/templates/deployment.yaml"},
+		{"helm/service.yaml.tmpl", "helm/templates/service.yaml"},
+		{"helm/ingress.yaml.tmpl", "helm/templates/ingress.yaml"},
 		{"kustomize/base/kustomization.yaml.tmpl", "kustomize/base/kustomization.yaml"},
 		{"kustomize/overlays/dev/kustomization.yaml.tmpl", "kustomize/overlays/dev/kustomization.yaml"},
 		{"github/ci.yml.tmpl", ".github/workflows/ci.yml"},

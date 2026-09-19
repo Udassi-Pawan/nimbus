@@ -22,15 +22,6 @@ type Config struct {
 }
 
 func Load() (Config, error) {
-	port := 8080
-	if v := os.Getenv("NIMBUS_PORT"); v != "" {
-		p, err := strconv.Atoi(v)
-		if err != nil {
-			return Config{}, fmt.Errorf("invalid NIMBUS_PORT: %w", err)
-		}
-		port = p
-	}
-
 	repoRoot := os.Getenv("NIMBUS_REPO_ROOT")
 	if repoRoot == "" {
 		var err error
@@ -38,6 +29,17 @@ func Load() (Config, error) {
 		if err != nil {
 			return Config{}, fmt.Errorf("find repo root: %w", err)
 		}
+	}
+
+	loadEnvFiles(repoRoot)
+
+	port := 8080
+	if v := os.Getenv("NIMBUS_PORT"); v != "" {
+		p, err := strconv.Atoi(v)
+		if err != nil {
+			return Config{}, fmt.Errorf("invalid NIMBUS_PORT: %w", err)
+		}
+		port = p
 	}
 
 	generatedDir := os.Getenv("NIMBUS_GENERATED_DIR")

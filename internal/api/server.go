@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/Udassi-Pawan/nimbus/internal/auth"
@@ -328,14 +330,28 @@ func (s *Server) handleDeployService(w http.ResponseWriter, r *http.Request) {
 		image = fmt.Sprintf("%s:latest", svc.Slug)
 	}
 
-	workload, err := s.k8s.DeployApp(r.Context(), k8s.DeployParams{
-		Namespace:     env.Namespace,
-		AppName:       svc.Slug,
+	chartPath := filepath.Join(s.generatedDir, svc.Slug, "helm")
+	if _, err := os.Stat(chartPath); err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf(
+			"no helm chart at %s — create this service from the golden path first",
+			chartPath,
+		))
+		return
+	}
+
+	if err := s.k8s.DeployHelm(r.Context(), k8s.HelmDeployParams{
+		ReleaseName: svc.Slug,
+		ChartPath:   chartPath,
+		Namespace:   env.Namespace,
 		Image:         image,
-		ContainerPort: 8080,
-		LivenessPath:  "/health",
-		ReadinessPath: "/health",
-	})
+		PullPolicy:    "Never",
+	}); err != nil {
+		slog.Error("helm deploy failed", "error", err, "chart", chartPath, "namespace", env.Namespace)
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("deploy failed: %v", err))
+		return
+	}
+
+	workload, err := s.k8s.GetWorkloadStatus(r.Context(), env.Namespace, svc.Slug)
 	if err != nil {
 		slog.Error("deploy failed", "error", err, "namespace", env.Namespace, "image", image)
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("deploy failed: %v", err))
@@ -362,6 +378,8 @@ func (s *Server) handleDeployService(w http.ResponseWriter, r *http.Request) {
 			"namespace":   env.Namespace,
 			"image":       image,
 			"status":      workload.DeploymentStatus,
+			"method":      "helm",
+			"chart_path":  chartPath,
 		})
 	}
 

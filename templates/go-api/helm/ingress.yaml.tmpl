@@ -1,0 +1,22 @@
+{{ "{{- if .Values.ingress.enabled }}" }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Slug }}
+  labels:
+    app.kubernetes.io/name: {{ .Slug }}
+    nimbus.io/managed-by: nimbus
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: {{ "{{ .Values.ingress.host }}" }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ .Slug }}
+                port:
+                  number: {{ "{{ .Values.service.port }}" }}
+{{ "{{- end }}" }}

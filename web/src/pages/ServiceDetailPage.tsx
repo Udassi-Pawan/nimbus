@@ -104,7 +104,8 @@ export default function ServiceDetailPage() {
       <div style={{ marginBottom: 16, padding: 12, border: '1px solid #ddd' }}>
         <h3 style={{ marginTop: 0 }}>Deploy to k3d</h3>
         <p style={{ marginTop: 0, color: '#555' }}>
-          Build and import the image first:{' '}
+          Deploy runs <strong>helm upgrade --install</strong> on{' '}
+          <code>generated/{service.slug}/helm</code>. Build and import the image first:{' '}
           <code>docker build -t {service.slug}:latest generated/{service.slug}</code>
           {' '}then{' '}
           <code>k3d image import {service.slug}:latest -c nimbus</code>

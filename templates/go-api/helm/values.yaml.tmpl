@@ -2,6 +2,7 @@ replicaCount: 1
 image:
   repository: {{ .Slug }}
   tag: latest
+  pullPolicy: Never
 service:
   port: 8080
 ingress:
