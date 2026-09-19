@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/Udassi-Pawan/nimbus/internal/auth"
+	"github.com/Udassi-Pawan/nimbus/internal/k8s"
 	"github.com/Udassi-Pawan/nimbus/internal/models"
 	"github.com/Udassi-Pawan/nimbus/internal/store"
 	"github.com/Udassi-Pawan/nimbus/internal/templates"
@@ -26,14 +27,16 @@ type Server struct {
 	auth         *auth.Service
 	generatedDir string
 	templatesDir string
+	k8s          *k8s.Client
 }
 
-func NewServer(st *store.Store, authService *auth.Service, generatedDir, templatesDir string) *Server {
+func NewServer(st *store.Store, authService *auth.Service, generatedDir, templatesDir string, k8sClient *k8s.Client) *Server {
 	return &Server{
 		store:        st,
 		auth:         authService,
 		generatedDir: generatedDir,
 		templatesDir: templatesDir,
+		k8s:          k8sClient,
 	}
 }
 
@@ -57,6 +60,7 @@ func (s *Server) Router() http.Handler {
 		r.Use(s.authMiddleware)
 
 		r.Get("/teams", s.handleListTeams)
+		r.Get("/cluster/status", s.handleGetClusterStatus)
 		r.Get("/services", s.handleListServices)
 		r.Post("/services", s.handleCreateService)
 		r.Post("/services/from-template", s.handleCreateFromTemplate)
@@ -261,6 +265,22 @@ func (s *Server) handleCreateFromTemplate(w http.ResponseWriter, r *http.Request
 		GeneratedFiles: generated.Files,
 		TemplateID:     generated.TemplateID,
 	})
+}
+
+func (s *Server) handleGetClusterStatus(w http.ResponseWriter, r *http.Request) {
+	if s.k8s == nil {
+		writeError(w, http.StatusServiceUnavailable, "kubernetes client not configured")
+		return
+	}
+
+	status, err := s.k8s.Status(r.Context())
+	if err != nil {
+		slog.Error("cluster status failed", "error", err)
+		writeError(w, http.StatusServiceUnavailable, fmt.Sprintf("cluster unreachable: %v", err))
+		return
+	}
+
+	writeJSON(w, http.StatusOK, status)
 }
 
 func (s *Server) handleListAuditLogs(w http.ResponseWriter, r *http.Request) {

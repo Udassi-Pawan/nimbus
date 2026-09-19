@@ -17,6 +17,8 @@ type Config struct {
 	RepoRoot             string
 	GeneratedServicesDir string
 	TemplatesDir         string
+	KubeconfigPath       string
+	KubernetesContext    string
 }
 
 func Load() (Config, error) {
@@ -66,6 +68,9 @@ func Load() (Config, error) {
 		logLevel = "info"
 	}
 
+	kubeconfigPath := os.Getenv("KUBECONFIG")
+	kubernetesContext := os.Getenv("KUBERNETES_CONTEXT")
+
 	return Config{
 		Port:                 port,
 		LogLevel:             logLevel,
@@ -74,5 +79,7 @@ func Load() (Config, error) {
 		RepoRoot:             repoRoot,
 		GeneratedServicesDir: generatedDir,
 		TemplatesDir:         templatesDir,
+		KubeconfigPath:       kubeconfigPath,
+		KubernetesContext:    kubernetesContext,
 	}, nil
 }

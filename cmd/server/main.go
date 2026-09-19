@@ -16,6 +16,7 @@ import (
 
 	"github.com/Udassi-Pawan/nimbus/internal/api"
 	"github.com/Udassi-Pawan/nimbus/internal/auth"
+	"github.com/Udassi-Pawan/nimbus/internal/k8s"
 )
 
 func main() {
@@ -41,7 +42,16 @@ func main() {
 	defer st.Close()
 
 	authService := auth.NewService(cfg.JWTSecret)
-	apiServer := api.NewServer(st, authService, cfg.GeneratedServicesDir, cfg.TemplatesDir)
+
+	var k8sClient *k8s.Client
+	k8sClient, err = k8s.NewClient(cfg.KubeconfigPath, cfg.KubernetesContext)
+	if err != nil {
+		logger.Warn("kubernetes client unavailable", "error", err)
+	} else {
+		logger.Info("kubernetes client ready", "context", k8sClient.ContextName())
+	}
+
+	apiServer := api.NewServer(st, authService, cfg.GeneratedServicesDir, cfg.TemplatesDir, k8sClient)
 
 	mux := http.NewServeMux()
 
