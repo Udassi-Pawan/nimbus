@@ -64,6 +64,8 @@ func (s *Server) Router() http.Handler {
 		r.Get("/services", s.handleListServices)
 		r.Post("/services", s.handleCreateService)
 		r.Post("/services/from-template", s.handleCreateFromTemplate)
+		r.Post("/services/{id}/deploy", s.handleDeployService)
+		r.Post("/services/{id}/sync-deployment", s.handleSyncDeployment)
 		r.Get("/services/{id}", s.handleGetService)
 		r.Get("/audit-logs", s.handleListAuditLogs)
 	})
@@ -146,22 +148,6 @@ func (s *Server) handleListServices(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, services)
-}
-
-func (s *Server) handleGetService(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-
-	svc, err := s.store.GetService(r.Context(), id)
-	if err != nil {
-		if err == store.ErrNotFound {
-			writeError(w, http.StatusNotFound, "service not found")
-			return
-		}
-		writeError(w, http.StatusInternalServerError, "failed to get service")
-		return
-	}
-
-	writeJSON(w, http.StatusOK, svc)
 }
 
 func (s *Server) handleCreateService(w http.ResponseWriter, r *http.Request) {
@@ -281,6 +267,192 @@ func (s *Server) handleGetClusterStatus(w http.ResponseWriter, r *http.Request) 
 	}
 
 	writeJSON(w, http.StatusOK, status)
+}
+
+func (s *Server) handleGetService(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+
+	svc, err := s.store.GetService(r.Context(), id)
+	if err != nil {
+		if err == store.ErrNotFound {
+			writeError(w, http.StatusNotFound, "service not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to get service")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, svc)
+}
+
+func (s *Server) handleDeployService(w http.ResponseWriter, r *http.Request) {
+	if s.k8s == nil {
+		writeError(w, http.StatusServiceUnavailable, "kubernetes client not configured")
+		return
+	}
+
+	serviceID := chi.URLParam(r, "id")
+
+	var input models.DeployServiceInput
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid json body")
+		return
+	}
+	if input.Environment == "" {
+		writeError(w, http.StatusBadRequest, "environment is required")
+		return
+	}
+
+	svc, err := s.store.GetService(r.Context(), serviceID)
+	if err != nil {
+		if err == store.ErrNotFound {
+			writeError(w, http.StatusNotFound, "service not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to get service")
+		return
+	}
+
+	env, err := s.store.GetServiceEnvironmentByName(r.Context(), serviceID, input.Environment)
+	if err != nil {
+		if err == store.ErrNotFound {
+			writeError(w, http.StatusNotFound, "environment not found for service")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to get environment")
+		return
+	}
+
+	image := input.Image
+	if image == "" {
+		image = fmt.Sprintf("%s:latest", svc.Slug)
+	}
+
+	workload, err := s.k8s.DeployApp(r.Context(), k8s.DeployParams{
+		Namespace:     env.Namespace,
+		AppName:       svc.Slug,
+		Image:         image,
+		ContainerPort: 8080,
+		LivenessPath:  "/health",
+		ReadinessPath: "/health",
+	})
+	if err != nil {
+		slog.Error("deploy failed", "error", err, "namespace", env.Namespace, "image", image)
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("deploy failed: %v", err))
+		return
+	}
+
+	updatedEnv, err := s.store.UpdateEnvironmentDeployment(
+		r.Context(),
+		env.ID,
+		workload.DeploymentStatus,
+		image,
+		int(workload.ReplicasDesired),
+		int(workload.ReplicasReady),
+	)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update deployment status")
+		return
+	}
+
+	if claims, ok := claimsFromContext(r.Context()); ok {
+		actorID := claims.UserID
+		_ = s.store.CreateAuditLog(r.Context(), &actorID, "service.deploy", "service", svc.ID, map[string]any{
+			"environment": input.Environment,
+			"namespace":   env.Namespace,
+			"image":       image,
+			"status":      workload.DeploymentStatus,
+		})
+	}
+
+	writeJSON(w, http.StatusOK, models.DeployServiceResponse{
+		Environment: updatedEnv,
+		Workload: models.WorkloadSummary{
+			Namespace:         workload.Namespace,
+			DeploymentName:    workload.DeploymentName,
+			Image:               workload.Image,
+			ReplicasDesired:     workload.ReplicasDesired,
+			ReplicasReady:       workload.ReplicasReady,
+			AvailableReplicas:   workload.AvailableReplicas,
+			DeploymentStatus:    workload.DeploymentStatus,
+		},
+	})
+}
+
+func (s *Server) handleSyncDeployment(w http.ResponseWriter, r *http.Request) {
+	if s.k8s == nil {
+		writeError(w, http.StatusServiceUnavailable, "kubernetes client not configured")
+		return
+	}
+
+	serviceID := chi.URLParam(r, "id")
+
+	var input models.SyncDeploymentInput
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid json body")
+		return
+	}
+	if input.Environment == "" {
+		writeError(w, http.StatusBadRequest, "environment is required")
+		return
+	}
+
+	svc, err := s.store.GetService(r.Context(), serviceID)
+	if err != nil {
+		if err == store.ErrNotFound {
+			writeError(w, http.StatusNotFound, "service not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to get service")
+		return
+	}
+
+	env, err := s.store.GetServiceEnvironmentByName(r.Context(), serviceID, input.Environment)
+	if err != nil {
+		if err == store.ErrNotFound {
+			writeError(w, http.StatusNotFound, "environment not found for service")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to get environment")
+		return
+	}
+
+	workload, err := s.k8s.GetWorkloadStatus(r.Context(), env.Namespace, svc.Slug)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "no deployment found in cluster for this environment")
+		return
+	}
+
+	image := workload.Image
+	if image == "" {
+		image = env.DeploymentImage
+	}
+
+	updatedEnv, err := s.store.UpdateEnvironmentDeployment(
+		r.Context(),
+		env.ID,
+		workload.DeploymentStatus,
+		image,
+		int(workload.ReplicasDesired),
+		int(workload.ReplicasReady),
+	)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update deployment status")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, models.DeployServiceResponse{
+		Environment: updatedEnv,
+		Workload: models.WorkloadSummary{
+			Namespace:         workload.Namespace,
+			DeploymentName:    workload.DeploymentName,
+			Image:               workload.Image,
+			ReplicasDesired:     workload.ReplicasDesired,
+			ReplicasReady:       workload.ReplicasReady,
+			AvailableReplicas:   workload.AvailableReplicas,
+			DeploymentStatus:    workload.DeploymentStatus,
+		},
+	})
 }
 
 func (s *Server) handleListAuditLogs(w http.ResponseWriter, r *http.Request) {

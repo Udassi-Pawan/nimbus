@@ -151,12 +151,16 @@ func (s *Store) CreateService(ctx context.Context, input models.CreateServiceInp
 	for _, envName := range envNames {
 		namespace := fmt.Sprintf("%s-%s", svc.Slug, envName)
 		var env models.ServiceEnvironment
-		err = tx.QueryRow(ctx, `
-			INSERT INTO service_environments (service_id, name, namespace)
-			VALUES ($1, $2, $3)
-			RETURNING id, service_id, name, namespace, created_at
-		`, svc.ID, envName, namespace).Scan(
-			&env.ID, &env.ServiceID, &env.Name, &env.Namespace, &env.CreatedAt,
+		err = scanServiceEnvironment(
+			tx.QueryRow(ctx, `
+				INSERT INTO service_environments (service_id, name, namespace)
+				VALUES ($1, $2, $3)
+				RETURNING id, service_id, name, namespace,
+				          deployment_status, deployment_image,
+				          deployment_replicas_desired, deployment_replicas_ready,
+				          last_deployed_at, created_at
+			`, svc.ID, envName, namespace),
+			&env,
 		)
 		if err != nil {
 			if isDuplicateKey(err) {
@@ -237,7 +241,10 @@ func (s *Store) GetService(ctx context.Context, id string) (models.Service, erro
 
 func (s *Store) listServiceEnvironments(ctx context.Context, serviceID string) ([]models.ServiceEnvironment, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT id, service_id, name, namespace, created_at
+		SELECT id, service_id, name, namespace,
+		       deployment_status, deployment_image,
+		       deployment_replicas_desired, deployment_replicas_ready,
+		       last_deployed_at, created_at
 		FROM service_environments
 		WHERE service_id = $1
 		ORDER BY name
@@ -250,12 +257,74 @@ func (s *Store) listServiceEnvironments(ctx context.Context, serviceID string) (
 	var envs []models.ServiceEnvironment
 	for rows.Next() {
 		var env models.ServiceEnvironment
-		if err := rows.Scan(&env.ID, &env.ServiceID, &env.Name, &env.Namespace, &env.CreatedAt); err != nil {
+		if err := scanServiceEnvironment(rows, &env); err != nil {
 			return nil, fmt.Errorf("scan environment: %w", err)
 		}
 		envs = append(envs, env)
 	}
 	return envs, rows.Err()
+}
+
+type rowScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanServiceEnvironment(row rowScanner, env *models.ServiceEnvironment) error {
+	return row.Scan(
+		&env.ID, &env.ServiceID, &env.Name, &env.Namespace,
+		&env.DeploymentStatus, &env.DeploymentImage,
+		&env.DeploymentReplicasDesired, &env.DeploymentReplicasReady,
+		&env.LastDeployedAt, &env.CreatedAt,
+	)
+}
+
+func (s *Store) GetServiceEnvironmentByName(ctx context.Context, serviceID, envName string) (models.ServiceEnvironment, error) {
+	var env models.ServiceEnvironment
+	err := scanServiceEnvironment(s.pool.QueryRow(ctx, `
+		SELECT id, service_id, name, namespace,
+		       deployment_status, deployment_image,
+		       deployment_replicas_desired, deployment_replicas_ready,
+		       last_deployed_at, created_at
+		FROM service_environments
+		WHERE service_id = $1 AND name = $2
+	`, serviceID, envName), &env)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return models.ServiceEnvironment{}, ErrNotFound
+		}
+		return models.ServiceEnvironment{}, fmt.Errorf("get service environment: %w", err)
+	}
+	return env, nil
+}
+
+func (s *Store) UpdateEnvironmentDeployment(
+	ctx context.Context,
+	envID string,
+	status string,
+	image string,
+	replicasDesired, replicasReady int,
+) (models.ServiceEnvironment, error) {
+	var env models.ServiceEnvironment
+	err := scanServiceEnvironment(s.pool.QueryRow(ctx, `
+		UPDATE service_environments
+		SET deployment_status = $2,
+		    deployment_image = $3,
+		    deployment_replicas_desired = $4,
+		    deployment_replicas_ready = $5,
+		    last_deployed_at = NOW()
+		WHERE id = $1
+		RETURNING id, service_id, name, namespace,
+		          deployment_status, deployment_image,
+		          deployment_replicas_desired, deployment_replicas_ready,
+		          last_deployed_at, created_at
+	`, envID, status, image, replicasDesired, replicasReady), &env)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return models.ServiceEnvironment{}, ErrNotFound
+		}
+		return models.ServiceEnvironment{}, fmt.Errorf("update environment deployment: %w", err)
+	}
+	return env, nil
 }
 
 func (s *Store) ListAuditLogs(ctx context.Context, limit int) ([]models.AuditLog, error) {

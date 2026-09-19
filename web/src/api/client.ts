@@ -50,6 +50,11 @@ export type ServiceEnvironment = {
   service_id: string;
   name: string;
   namespace: string;
+  deployment_status: string;
+  deployment_image: string;
+  deployment_replicas_desired: number;
+  deployment_replicas_ready: number;
+  last_deployed_at?: string;
   created_at: string;
 };
 
@@ -111,13 +116,6 @@ export async function listAuditLogs() {
     return data ?? [];
   }
 
-  export type CreateFromTemplateResponse = {
-    service: Service;
-    generated_path: string;
-    generated_files: string[];
-    template_id: string;
-  };
-  
   export function createServiceFromTemplate(input: {
     template_id?: string;
     team_id: string;
@@ -140,3 +138,46 @@ export async function listAuditLogs() {
       }),
     });
   }
+
+export type CreateFromTemplateResponse = {
+  service: Service;
+  generated_path: string;
+  generated_files: string[];
+  template_id: string;
+};
+
+export type DeployServiceResponse = {
+  environment: ServiceEnvironment;
+  workload: {
+    namespace: string;
+    deployment_name: string;
+    image: string;
+    replicas_desired: number;
+    replicas_ready: number;
+    available_replicas: number;
+    deployment_status: string;
+  };
+};
+
+export function deployService(
+  serviceId: string,
+  input: { environment: string; image?: string }
+) {
+  return request<DeployServiceResponse>(`/api/v1/services/${serviceId}/deploy`, {
+    method: 'POST',
+    body: JSON.stringify({
+      environment: input.environment,
+      image: input.image ?? '',
+    }),
+  });
+}
+
+export function syncDeployment(
+  serviceId: string,
+  input: { environment: string }
+) {
+  return request<DeployServiceResponse>(`/api/v1/services/${serviceId}/sync-deployment`, {
+    method: 'POST',
+    body: JSON.stringify({ environment: input.environment }),
+  });
+}

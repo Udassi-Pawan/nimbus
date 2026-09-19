@@ -38,11 +38,16 @@ type Service struct {
 }
 
 type ServiceEnvironment struct {
-	ID        string    `json:"id"`
-	ServiceID string    `json:"service_id"`
-	Name      string    `json:"name"`
-	Namespace string    `json:"namespace"`
-	CreatedAt time.Time `json:"created_at"`
+	ID                      string     `json:"id"`
+	ServiceID               string     `json:"service_id"`
+	Name                    string     `json:"name"`
+	Namespace               string     `json:"namespace"`
+	DeploymentStatus        string     `json:"deployment_status"`
+	DeploymentImage         string     `json:"deployment_image"`
+	DeploymentReplicasDesired int      `json:"deployment_replicas_desired"`
+	DeploymentReplicasReady   int      `json:"deployment_replicas_ready"`
+	LastDeployedAt          *time.Time `json:"last_deployed_at,omitempty"`
+	CreatedAt               time.Time  `json:"created_at"`
 }
 
 type CreateServiceInput struct {
@@ -90,4 +95,28 @@ type CreateFromTemplateResponse struct {
 	GeneratedPath  string         `json:"generated_path"`
 	GeneratedFiles []string       `json:"generated_files"`
 	TemplateID     string         `json:"template_id"`
+}
+
+type DeployServiceInput struct {
+	Environment string `json:"environment"`
+	Image       string `json:"image"`
+}
+
+type SyncDeploymentInput struct {
+	Environment string `json:"environment"`
+}
+
+type WorkloadSummary struct {
+	Namespace         string `json:"namespace"`
+	DeploymentName    string `json:"deployment_name"`
+	Image             string `json:"image"`
+	ReplicasDesired   int32  `json:"replicas_desired"`
+	ReplicasReady     int32  `json:"replicas_ready"`
+	AvailableReplicas int32  `json:"available_replicas"`
+	DeploymentStatus  string `json:"deployment_status"`
+}
+
+type DeployServiceResponse struct {
+	Environment ServiceEnvironment `json:"environment"`
+	Workload    WorkloadSummary    `json:"workload"`
 }
