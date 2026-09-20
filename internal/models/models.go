@@ -120,3 +120,36 @@ type DeployServiceResponse struct {
 	Environment ServiceEnvironment `json:"environment"`
 	Workload    WorkloadSummary    `json:"workload"`
 }
+
+type ServiceNetworkResponse struct {
+	Environment    string `json:"environment"`
+	Namespace      string `json:"namespace"`
+	ServiceName    string `json:"service_name"`
+	Port           int32  `json:"port"`
+	ClusterIP      string `json:"cluster_ip"`
+	DNSShort       string `json:"dns_short"`
+	DNSFQDN        string `json:"dns_fqdn"`
+	IngressHost    string `json:"ingress_host,omitempty"`
+	IngressURL     string `json:"ingress_url,omitempty"`
+	EndpointsReady int    `json:"endpoints_ready"`
+	ServiceFound   bool   `json:"service_found"`
+}
+
+type ConnectivityCheckInput struct {
+	Environment     string `json:"environment"`
+	TargetServiceID string `json:"target_service_id"`
+}
+
+type ConnectivityCheckResponse struct {
+	Environment       string `json:"environment"`
+	SourceServiceID     string `json:"source_service_id"`
+	TargetServiceID     string `json:"target_service_id"`
+	TargetServiceSlug   string `json:"target_service_slug"`
+	OK                  bool   `json:"ok"`
+	Message             string `json:"message"`
+	SourceNamespace     string `json:"source_namespace"`
+	TargetNamespace     string `json:"target_namespace"`
+	TargetServiceName   string `json:"target_service_name"`
+	TargetURL           string `json:"target_url"`
+	EndpointsReady      int    `json:"endpoints_ready"`
+}

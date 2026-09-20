@@ -68,6 +68,8 @@ func (s *Server) Router() http.Handler {
 		r.Post("/services/from-template", s.handleCreateFromTemplate)
 		r.Post("/services/{id}/deploy", s.handleDeployService)
 		r.Post("/services/{id}/sync-deployment", s.handleSyncDeployment)
+		r.Get("/services/{id}/network", s.handleGetServiceNetwork)
+		r.Post("/services/{id}/connectivity", s.handleCheckConnectivity)
 		r.Get("/services/{id}", s.handleGetService)
 		r.Get("/audit-logs", s.handleListAuditLogs)
 	})
@@ -269,6 +271,156 @@ func (s *Server) handleGetClusterStatus(w http.ResponseWriter, r *http.Request) 
 	}
 
 	writeJSON(w, http.StatusOK, status)
+}
+
+func (s *Server) handleGetServiceNetwork(w http.ResponseWriter, r *http.Request) {
+	if s.k8s == nil {
+		writeError(w, http.StatusServiceUnavailable, "kubernetes client not configured")
+		return
+	}
+
+	serviceID := chi.URLParam(r, "id")
+	environment := r.URL.Query().Get("environment")
+	if environment == "" {
+		writeError(w, http.StatusBadRequest, "environment query parameter is required")
+		return
+	}
+
+	svc, err := s.store.GetService(r.Context(), serviceID)
+	if err != nil {
+		if err == store.ErrNotFound {
+			writeError(w, http.StatusNotFound, "service not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to get service")
+		return
+	}
+
+	env, err := s.store.GetServiceEnvironmentByName(r.Context(), serviceID, environment)
+	if err != nil {
+		if err == store.ErrNotFound {
+			writeError(w, http.StatusNotFound, "environment not found for service")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to get environment")
+		return
+	}
+
+	net, err := s.k8s.GetServiceNetwork(r.Context(), env.Namespace, svc.Slug)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("network lookup failed: %v", err))
+		return
+	}
+
+	writeJSON(w, http.StatusOK, models.ServiceNetworkResponse{
+		Environment:    environment,
+		Namespace:      net.Namespace,
+		ServiceName:    net.ServiceName,
+		Port:           net.Port,
+		ClusterIP:      net.ClusterIP,
+		DNSShort:       net.DNSShort,
+		DNSFQDN:        net.DNSFQDN,
+		IngressHost:    net.IngressHost,
+		IngressURL:     net.IngressURL,
+		EndpointsReady: net.EndpointsReady,
+		ServiceFound:   net.ServiceFound,
+	})
+}
+
+func (s *Server) handleCheckConnectivity(w http.ResponseWriter, r *http.Request) {
+	if s.k8s == nil {
+		writeError(w, http.StatusServiceUnavailable, "kubernetes client not configured")
+		return
+	}
+
+	sourceID := chi.URLParam(r, "id")
+
+	var input models.ConnectivityCheckInput
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid json body")
+		return
+	}
+	if input.Environment == "" || input.TargetServiceID == "" {
+		writeError(w, http.StatusBadRequest, "environment and target_service_id are required")
+		return
+	}
+
+	sourceSvc, err := s.store.GetService(r.Context(), sourceID)
+	if err != nil {
+		if err == store.ErrNotFound {
+			writeError(w, http.StatusNotFound, "service not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to get service")
+		return
+	}
+
+	sourceEnv, err := s.store.GetServiceEnvironmentByName(r.Context(), sourceID, input.Environment)
+	if err != nil {
+		if err == store.ErrNotFound {
+			writeError(w, http.StatusNotFound, "environment not found for source service")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to get source environment")
+		return
+	}
+
+	targetSvc, err := s.store.GetService(r.Context(), input.TargetServiceID)
+	if err != nil {
+		if err == store.ErrNotFound {
+			writeError(w, http.StatusNotFound, "target service not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to get target service")
+		return
+	}
+
+	targetEnv, err := s.store.GetServiceEnvironmentByName(r.Context(), input.TargetServiceID, input.Environment)
+	if err != nil {
+		if err == store.ErrNotFound {
+			writeError(w, http.StatusNotFound, "environment not found for target service")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to get target environment")
+		return
+	}
+
+	result, err := s.k8s.CheckConnectivity(
+		r.Context(),
+		sourceEnv.Namespace,
+		targetEnv.Namespace,
+		targetSvc.Slug,
+		"/health",
+	)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("connectivity check failed: %v", err))
+		return
+	}
+
+	if claims, ok := claimsFromContext(r.Context()); ok {
+		actorID := claims.UserID
+		_ = s.store.CreateAuditLog(r.Context(), &actorID, "service.connectivity.check", "service", sourceSvc.ID, map[string]any{
+			"environment":         input.Environment,
+			"target_service_id":   targetSvc.ID,
+			"target_slug":         targetSvc.Slug,
+			"ok":                  result.OK,
+			"target_url":          result.TargetURL,
+		})
+	}
+
+	writeJSON(w, http.StatusOK, models.ConnectivityCheckResponse{
+		Environment:       input.Environment,
+		SourceServiceID:     sourceSvc.ID,
+		TargetServiceID:     targetSvc.ID,
+		TargetServiceSlug:   targetSvc.Slug,
+		OK:                  result.OK,
+		Message:             result.Message,
+		SourceNamespace:     result.SourceNamespace,
+		TargetNamespace:     result.TargetNamespace,
+		TargetServiceName:   result.TargetServiceName,
+		TargetURL:           result.TargetURL,
+		EndpointsReady:      result.EndpointsReady,
+	})
 }
 
 func (s *Server) handleGetService(w http.ResponseWriter, r *http.Request) {

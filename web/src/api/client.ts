@@ -181,3 +181,46 @@ export function syncDeployment(
     body: JSON.stringify({ environment: input.environment }),
   });
 }
+
+export type ServiceNetworkInfo = {
+  environment: string;
+  namespace: string;
+  service_name: string;
+  port: number;
+  cluster_ip: string;
+  dns_short: string;
+  dns_fqdn: string;
+  ingress_host?: string;
+  ingress_url?: string;
+  endpoints_ready: number;
+  service_found: boolean;
+};
+
+export function getServiceNetwork(serviceId: string, environment: string) {
+  const q = new URLSearchParams({ environment });
+  return request<ServiceNetworkInfo>(`/api/v1/services/${serviceId}/network?${q}`);
+}
+
+export type ConnectivityCheckResult = {
+  environment: string;
+  source_service_id: string;
+  target_service_id: string;
+  target_service_slug: string;
+  ok: boolean;
+  message: string;
+  source_namespace: string;
+  target_namespace: string;
+  target_service_name: string;
+  target_url: string;
+  endpoints_ready: number;
+};
+
+export function checkConnectivity(
+  serviceId: string,
+  input: { environment: string; target_service_id: string }
+) {
+  return request<ConnectivityCheckResult>(`/api/v1/services/${serviceId}/connectivity`, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
