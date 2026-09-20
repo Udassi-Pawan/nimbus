@@ -24,6 +24,7 @@ type DeployParams struct {
 type WorkloadStatus struct {
 	Namespace           string `json:"namespace"`
 	DeploymentName      string `json:"deployment_name"`
+	WorkloadKind        string `json:"workload_kind"`
 	Image               string `json:"image"`
 	ReplicasDesired     int32  `json:"replicas_desired"`
 	ReplicasReady       int32  `json:"replicas_ready"`
@@ -158,25 +159,62 @@ func (c *Client) DeployApp(ctx context.Context, p DeployParams) (WorkloadStatus,
 
 func (c *Client) GetWorkloadStatus(ctx context.Context, namespace, appName string) (WorkloadStatus, error) {
 	deployment, err := c.clientset.AppsV1().Deployments(namespace).Get(ctx, appName, metav1.GetOptions{})
-	if err != nil {
+	if err == nil {
+		return workloadFromDeployment(namespace, deployment), nil
+	}
+	if !apierrors.IsNotFound(err) {
 		return WorkloadStatus{}, fmt.Errorf("get deployment: %w", err)
 	}
 
+	sts, err := c.clientset.AppsV1().StatefulSets(namespace).Get(ctx, appName, metav1.GetOptions{})
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return WorkloadStatus{}, fmt.Errorf("get deployment: %w", err)
+		}
+		return WorkloadStatus{}, fmt.Errorf("get statefulset: %w", err)
+	}
+	return workloadFromStatefulSet(namespace, sts), nil
+}
+
+func workloadFromDeployment(namespace string, deployment *appsv1.Deployment) WorkloadStatus {
 	image := ""
 	if len(deployment.Spec.Template.Spec.Containers) > 0 {
 		image = deployment.Spec.Template.Spec.Containers[0].Image
 	}
-
-	status := WorkloadStatus{
+	return WorkloadStatus{
 		Namespace:         namespace,
-		DeploymentName:      appName,
-		Image:               image,
-		ReplicasDesired:     derefInt32(deployment.Spec.Replicas),
-		ReplicasReady:       deployment.Status.ReadyReplicas,
-		AvailableReplicas:   deployment.Status.AvailableReplicas,
-		DeploymentStatus:    deploymentStatusFromDeployment(deployment),
+		DeploymentName:    deployment.Name,
+		WorkloadKind:      "Deployment",
+		Image:             image,
+		ReplicasDesired:   derefInt32(deployment.Spec.Replicas),
+		ReplicasReady:     deployment.Status.ReadyReplicas,
+		AvailableReplicas: deployment.Status.AvailableReplicas,
+		DeploymentStatus:  deploymentStatusFromDeployment(deployment),
 	}
-	return status, nil
+}
+
+func workloadFromStatefulSet(namespace string, sts *appsv1.StatefulSet) WorkloadStatus {
+	image := ""
+	if len(sts.Spec.Template.Spec.Containers) > 0 {
+		image = sts.Spec.Template.Spec.Containers[0].Image
+	}
+	return WorkloadStatus{
+		Namespace:         namespace,
+		DeploymentName:    sts.Name,
+		WorkloadKind:      "StatefulSet",
+		Image:             image,
+		ReplicasDesired:   derefInt32(sts.Spec.Replicas),
+		ReplicasReady:     sts.Status.ReadyReplicas,
+		AvailableReplicas: sts.Status.ReadyReplicas,
+		DeploymentStatus:  statefulSetStatus(sts),
+	}
+}
+
+func (c *Client) EnsureNamespace(ctx context.Context, name string) error {
+	labels := map[string]string{
+		"nimbus.io/managed-by": "nimbus",
+	}
+	return c.ensureNamespace(ctx, name, labels)
 }
 
 func (c *Client) ensureNamespace(ctx context.Context, name string, labels map[string]string) error {
@@ -210,6 +248,20 @@ func deploymentStatusFromDeployment(d *appsv1.Deployment) string {
 		return "progressing"
 	}
 	if d.Status.Replicas == 0 {
+		return "pending"
+	}
+	return "unknown"
+}
+
+func statefulSetStatus(sts *appsv1.StatefulSet) string {
+	desired := derefInt32(sts.Spec.Replicas)
+	if sts.Status.ReadyReplicas >= desired && sts.Status.ReadyReplicas > 0 {
+		return "running"
+	}
+	if sts.Status.Replicas > sts.Status.ReadyReplicas {
+		return "progressing"
+	}
+	if sts.Status.Replicas == 0 {
 		return "pending"
 	}
 	return "unknown"

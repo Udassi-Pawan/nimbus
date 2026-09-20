@@ -1,0 +1,15 @@
+replicaCount: 1
+image:
+  repository: postgres
+  tag: "16"
+  pullPolicy: IfNotPresent
+auth:
+  secretName: {{ .Slug }}-auth
+  username: {{ .Slug }}
+  database: {{ .Slug }}
+persistence:
+  enabled: true
+  size: 5Gi
+  storageClass: local-path
+service:
+  port: 5432

@@ -25,21 +25,25 @@ type contextKey string
 const userClaimsKey contextKey = "userClaims"
 
 type Server struct {
-	store        *store.Store
-	auth         *auth.Service
-	generatedDir string
-	templatesDir string
-	k8s          *k8s.Client
+	store         *store.Store
+	auth          *auth.Service
+	generatedDir  string
+	templatesRoot string
+	k8s           *k8s.Client
 }
 
-func NewServer(st *store.Store, authService *auth.Service, generatedDir, templatesDir string, k8sClient *k8s.Client) *Server {
+func NewServer(st *store.Store, authService *auth.Service, generatedDir, templatesRoot string, k8sClient *k8s.Client) *Server {
 	return &Server{
-		store:        st,
+		store:         st,
 		auth:         authService,
 		generatedDir: generatedDir,
-		templatesDir: templatesDir,
+		templatesRoot: templatesRoot,
 		k8s:          k8sClient,
 	}
+}
+
+func (s *Server) templateDir(templateID string) string {
+	return filepath.Join(s.templatesRoot, templateID)
 }
 
 func (s *Server) Router() http.Handler {
@@ -69,7 +73,11 @@ func (s *Server) Router() http.Handler {
 		r.Post("/services/{id}/deploy", s.handleDeployService)
 		r.Post("/services/{id}/sync-deployment", s.handleSyncDeployment)
 		r.Get("/services/{id}/network", s.handleGetServiceNetwork)
+		r.Get("/services/{id}/data-connection", s.handleGetDataConnection)
 		r.Post("/services/{id}/connectivity", s.handleCheckConnectivity)
+		r.Get("/services/{id}/dependencies", s.handleListDependencies)
+		r.Post("/services/{id}/dependencies", s.handleAddDependency)
+		r.Delete("/services/{id}/dependencies/{depId}", s.handleDeleteDependency)
 		r.Get("/services/{id}", s.handleGetService)
 		r.Get("/audit-logs", s.handleListAuditLogs)
 	})
@@ -204,12 +212,8 @@ func (s *Server) handleCreateFromTemplate(w http.ResponseWriter, r *http.Request
 		templateID = "go-api"
 	}
 
-	if templateID != "go-api" {
-		writeError(w, http.StatusBadRequest, "unsupported template_id")
-		return
-	}
-
-	generated, err := templates.GenerateGoAPI(s.generatedDir, s.templatesDir, templates.ServiceTemplateInput{
+	templateDir := s.templateDir(templateID)
+	generated, err := templates.Generate(templateID, s.generatedDir, templateDir, templates.ServiceTemplateInput{
 		Name:          input.Name,
 		Slug:          input.Slug,
 		Description:   input.Description,
@@ -217,7 +221,7 @@ func (s *Server) handleCreateFromTemplate(w http.ResponseWriter, r *http.Request
 		OwnerEmail:    input.OwnerEmail,
 	})
 	if err != nil {
-		slog.Error("template generation failed", "error", err, "templates_dir", s.templatesDir)
+		slog.Error("template generation failed", "error", err, "template_id", templateID, "templates_dir", templateDir)
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to generate template files: %v", err))
 		return
 	}
@@ -229,6 +233,8 @@ func (s *Server) handleCreateFromTemplate(w http.ResponseWriter, r *http.Request
 		Description:   input.Description,
 		RepositoryURL: input.RepositoryURL,
 		OwnerEmail:    input.OwnerEmail,
+		TemplateID:    templateID,
+		WorkloadType:  templates.WorkloadTypeForTemplate(templateID),
 	})
 	if err != nil {
 		if err == store.ErrDuplicateSlug {
@@ -479,7 +485,11 @@ func (s *Server) handleDeployService(w http.ResponseWriter, r *http.Request) {
 
 	image := input.Image
 	if image == "" {
-		image = fmt.Sprintf("%s:latest", svc.Slug)
+		if svc.WorkloadType == "stateful" {
+			image = statefulImageRef(svc.TemplateID)
+		} else {
+			image = fmt.Sprintf("%s:latest", svc.Slug)
+		}
 	}
 
 	chartPath := filepath.Join(s.generatedDir, svc.Slug, "helm")
@@ -491,12 +501,29 @@ func (s *Server) handleDeployService(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	extraSets, skipImage, secretName, err := s.helmExtraSetsForDeploy(r.Context(), svc, env, input)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("deploy prepare failed: %v", err))
+		return
+	}
+	storageSize, storageClass := normalizeStorage(input, env, svc.TemplateID)
+	if secretName == "" && env.SecretName != "" {
+		secretName = env.SecretName
+	}
+
+	if err := s.syncDependencySecretsToAppNamespace(r.Context(), svc, env, input.Environment); err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("deploy prepare failed: %v", err))
+		return
+	}
+
 	if err := s.k8s.DeployHelm(r.Context(), k8s.HelmDeployParams{
-		ReleaseName: svc.Slug,
-		ChartPath:   chartPath,
-		Namespace:   env.Namespace,
+		ReleaseName:   svc.Slug,
+		ChartPath:     chartPath,
+		Namespace:     env.Namespace,
 		Image:         image,
 		PullPolicy:    "Never",
+		SkipImageSets: skipImage,
+		ExtraSets:     extraSets,
 	}); err != nil {
 		slog.Error("helm deploy failed", "error", err, "chart", chartPath, "namespace", env.Namespace)
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("deploy failed: %v", err))
@@ -510,13 +537,14 @@ func (s *Server) handleDeployService(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	updatedEnv, err := s.store.UpdateEnvironmentDeployment(
+	updatedEnv, err := s.persistDeployStatus(
 		r.Context(),
-		env.ID,
-		workload.DeploymentStatus,
+		env,
+		workload,
 		image,
-		int(workload.ReplicasDesired),
-		int(workload.ReplicasReady),
+		secretName,
+		storageSize,
+		storageClass,
 	)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update deployment status")
@@ -589,7 +617,7 @@ func (s *Server) handleSyncDeployment(w http.ResponseWriter, r *http.Request) {
 
 	workload, err := s.k8s.GetWorkloadStatus(r.Context(), env.Namespace, svc.Slug)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "no deployment found in cluster for this environment")
+		writeError(w, http.StatusNotFound, "no workload found in cluster for this environment")
 		return
 	}
 
@@ -598,13 +626,14 @@ func (s *Server) handleSyncDeployment(w http.ResponseWriter, r *http.Request) {
 		image = env.DeploymentImage
 	}
 
-	updatedEnv, err := s.store.UpdateEnvironmentDeployment(
+	updatedEnv, err := s.persistDeployStatus(
 		r.Context(),
-		env.ID,
-		workload.DeploymentStatus,
+		env,
+		workload,
 		image,
-		int(workload.ReplicasDesired),
-		int(workload.ReplicasReady),
+		env.SecretName,
+		env.StorageSize,
+		env.StorageClass,
 	)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update deployment status")

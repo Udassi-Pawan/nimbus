@@ -1,0 +1,14 @@
+replicaCount: 1
+image:
+  repository: redis
+  tag: "7"
+  pullPolicy: IfNotPresent
+auth:
+  secretName: {{ .Slug }}-auth
+  password: ""
+persistence:
+  enabled: true
+  size: 1Gi
+  storageClass: local-path
+service:
+  port: 6379

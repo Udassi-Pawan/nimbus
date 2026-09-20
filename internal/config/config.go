@@ -50,7 +50,7 @@ func Load() (Config, error) {
 
 	templatesDir := os.Getenv("NIMBUS_TEMPLATES_DIR")
 	if templatesDir == "" {
-		templatesDir = filepath.Join(repoRoot, "templates", "go-api")
+		templatesDir = filepath.Join(repoRoot, "templates")
 	} else {
 		templatesDir = paths.ResolvePath(repoRoot, templatesDir)
 	}

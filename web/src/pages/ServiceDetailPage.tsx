@@ -1,14 +1,22 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import {
+  addServiceDependency,
   checkConnectivity,
   deployService,
+  getDataConnection,
   getService,
   getServiceNetwork,
   listServices,
+  removeServiceDependency,
   syncDeployment,
 } from '../api/client';
-import type { ConnectivityCheckResult, Service, ServiceNetworkInfo } from '../api/client';
+import type {
+  ConnectivityCheckResult,
+  DataConnectionInfo,
+  Service,
+  ServiceNetworkInfo,
+} from '../api/client';
 
 function envNeedsSync(service: Service): boolean {
   return (service.environments ?? []).some(env => {
@@ -36,12 +44,19 @@ export default function ServiceDetailPage() {
   const [connectTargetId, setConnectTargetId] = useState('');
   const [connectResult, setConnectResult] = useState<ConnectivityCheckResult | null>(null);
   const [connecting, setConnecting] = useState(false);
+  const [storageSize, setStorageSize] = useState('5Gi');
+  const [dataConn, setDataConn] = useState<DataConnectionInfo | null>(null);
+  const [depTargetId, setDepTargetId] = useState('');
+  const [depBusy, setDepBusy] = useState(false);
 
   const load = useCallback(async () => {
     if (!id) return;
     const svc = await getService(id);
     setService(svc);
     setImage(prev => (prev ? prev : `${svc.slug}:latest`));
+    if (svc.template_id === 'redis') {
+      setStorageSize('1Gi');
+    }
   }, [id]);
 
   useEffect(() => {
@@ -82,6 +97,44 @@ export default function ServiceDetailPage() {
   useEffect(() => {
     loadNetwork().catch(() => {});
   }, [loadNetwork]);
+
+  useEffect(() => {
+    if (!id || !service || service.workload_type !== 'stateful') {
+      setDataConn(null);
+      return;
+    }
+    getDataConnection(id, networkEnv)
+      .then(setDataConn)
+      .catch(() => setDataConn(null));
+  }, [id, service, networkEnv]);
+
+  async function handleAddDependency() {
+    if (!id || !depTargetId) return;
+    setDepBusy(true);
+    setError('');
+    try {
+      await addServiceDependency(id, depTargetId);
+      setDepTargetId('');
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Add dependency failed');
+    } finally {
+      setDepBusy(false);
+    }
+  }
+
+  async function handleRemoveDependency(dependencyId: string) {
+    if (!id) return;
+    setDepBusy(true);
+    try {
+      await removeServiceDependency(id, dependencyId);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Remove dependency failed');
+    } finally {
+      setDepBusy(false);
+    }
+  }
 
   async function handleConnectivityCheck() {
     if (!id || !connectTargetId) return;
@@ -134,9 +187,11 @@ export default function ServiceDetailPage() {
     setDeployingEnv(environment);
 
     try {
+      const isStatefulDeploy = service.workload_type === 'stateful';
       const result = await deployService(id, {
         environment,
-        image: image.trim() || undefined,
+        image: isStatefulDeploy ? undefined : image.trim() || undefined,
+        storage_size: isStatefulDeploy ? storageSize : undefined,
       });
       setSuccess(
         `Deployed to ${result.workload.namespace}: ${result.workload.replicas_ready}/${result.workload.replicas_desired} ready (${result.workload.deployment_status}).`
@@ -160,6 +215,7 @@ export default function ServiceDetailPage() {
       <Link to="/services">← Back</Link>
       <h2>{service.name}</h2>
       <p><strong>Slug:</strong> {service.slug}</p>
+      <p><strong>Template:</strong> {service.template_id || 'go-api'} ({service.workload_type || 'stateless'})</p>
       <p><strong>Repo:</strong> {service.repository_url || '—'}</p>
       <p><strong>Owner:</strong> {service.owner_email}</p>
 
@@ -170,19 +226,42 @@ export default function ServiceDetailPage() {
         <h3 style={{ marginTop: 0 }}>Deploy to k3d</h3>
         <p style={{ marginTop: 0, color: '#555' }}>
           Deploy runs <strong>helm upgrade --install</strong> on{' '}
-          <code>generated/{service.slug}/helm</code>. Build and import the image first:{' '}
-          <code>docker build -t {service.slug}:latest generated/{service.slug}</code>
-          {' '}then{' '}
-          <code>k3d image import {service.slug}:latest -c nimbus</code>
+          <code>generated/{service.slug}/helm</code>.
+          {service.workload_type === 'stateful' ? (
+            <>
+              {' '}Pull images into k3d first, e.g.{' '}
+              <code>docker pull postgres:16</code> then{' '}
+              <code>k3d image import postgres:16 -c nimbus</code>.
+              Password is generated once into Secret <code>{service.slug}-auth</code> (not stored in Nimbus).
+            </>
+          ) : (
+            <>
+              {' '}Build and import the app image:{' '}
+              <code>docker build -t {service.slug}:latest generated/{service.slug}</code>
+              {' '}then <code>k3d image import {service.slug}:latest -c nimbus</code>
+            </>
+          )}
         </p>
-        <label>
-          Container image:{' '}
-          <input
-            value={image}
-            onChange={e => setImage(e.target.value)}
-            style={{ width: 280 }}
-          />
-        </label>
+        {service.workload_type !== 'stateful' && (
+          <label>
+            Container image:{' '}
+            <input
+              value={image}
+              onChange={e => setImage(e.target.value)}
+              style={{ width: 280 }}
+            />
+          </label>
+        )}
+        {service.workload_type === 'stateful' && (
+          <label>
+            PVC size:{' '}
+            <input
+              value={storageSize}
+              onChange={e => setStorageSize(e.target.value)}
+              style={{ width: 120 }}
+            />
+          </label>
+        )}
         <div style={{ marginTop: 8 }}>
           <button type="button" onClick={() => syncFromCluster()} disabled={syncing}>
             {syncing ? 'Syncing from cluster…' : 'Refresh status from cluster'}
@@ -201,6 +280,7 @@ export default function ServiceDetailPage() {
             <th>Namespace</th>
             <th>Status</th>
             <th>Ready</th>
+            {service.workload_type === 'stateful' && <th>PVC</th>}
             <th></th>
           </tr>
         </thead>
@@ -213,6 +293,9 @@ export default function ServiceDetailPage() {
               <td>
                 {env.deployment_replicas_ready}/{env.deployment_replicas_desired}
               </td>
+              {service.workload_type === 'stateful' && (
+                <td>{env.pvc_phase || '—'}</td>
+              )}
               <td>
                 <button
                   type="button"
@@ -226,6 +309,78 @@ export default function ServiceDetailPage() {
           ))}
         </tbody>
       </table>
+
+      {service.workload_type !== 'stateful' && (
+        <div style={{ marginTop: 24, padding: 12, border: '1px solid #ddd' }}>
+          <h3 style={{ marginTop: 0 }}>Dependencies</h3>
+          <ul>
+            {(service.dependencies ?? []).map(d => (
+              <li key={d.id}>
+                {d.depends_on_name} ({d.depends_on_slug}) — {d.depends_on_template_id}
+                <button
+                  type="button"
+                  style={{ marginLeft: 8 }}
+                  disabled={depBusy}
+                  onClick={() => handleRemoveDependency(d.id)}
+                >
+                  Remove
+                </button>
+              </li>
+            ))}
+            {(service.dependencies ?? []).length === 0 && <li>None</li>}
+          </ul>
+          <label>
+            Add dependency:{' '}
+            <select
+              value={depTargetId}
+              onChange={e => setDepTargetId(e.target.value)}
+              style={{ minWidth: 220 }}
+            >
+              <option value="">— select —</option>
+              {peerServices
+                .filter(s => !(service.dependencies ?? []).some(d => d.depends_on_service_id === s.id))
+                .map(s => (
+                  <option key={s.id} value={s.id}>
+                    {s.name} ({s.slug})
+                  </option>
+                ))}
+            </select>
+          </label>
+          <button
+            type="button"
+            style={{ marginLeft: 8 }}
+            disabled={!depTargetId || depBusy}
+            onClick={() => handleAddDependency()}
+          >
+            Add
+          </button>
+          <p style={{ color: '#555', fontSize: 14 }}>
+            Redeploy this app after adding postgres/redis so Helm picks up env vars.
+          </p>
+        </div>
+      )}
+
+      {service.workload_type === 'stateful' && dataConn && (
+        <div style={{ marginTop: 24, padding: 12, border: '1px solid #ddd' }}>
+          <h3 style={{ marginTop: 0 }}>Data connection ({networkEnv})</h3>
+          <dl style={{ display: 'grid', gridTemplateColumns: '140px 1fr', gap: '4px 12px' }}>
+            <dt>Host</dt>
+            <dd><code>{dataConn.host}</code></dd>
+            <dt>Port</dt>
+            <dd>{dataConn.port}</dd>
+            {dataConn.database && (
+              <>
+                <dt>Database</dt>
+                <dd><code>{dataConn.database}</code></dd>
+              </>
+            )}
+            <dt>Secret</dt>
+            <dd><code>{dataConn.secret_name}</code> (keys: {dataConn.password_key}{dataConn.username_key ? `, ${dataConn.username_key}` : ''})</dd>
+            <dt>PVC phase</dt>
+            <dd>{dataConn.pvc_phase || '—'}</dd>
+          </dl>
+        </div>
+      )}
 
       <div style={{ marginTop: 24, padding: 12, border: '1px solid #ddd' }}>
         <h3 style={{ marginTop: 0 }}>Network</h3>

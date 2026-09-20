@@ -15,6 +15,8 @@ type HelmDeployParams struct {
 	Namespace     string
 	Image         string
 	PullPolicy    string
+	SkipImageSets bool
+	ExtraSets     []string
 }
 
 // DeployHelm runs `helm upgrade --install` against a chart on disk (generated/{slug}/helm).
@@ -44,9 +46,18 @@ func (c *Client) DeployHelm(ctx context.Context, p HelmDeployParams) error {
 		"--atomic",
 		"--wait",
 		"--timeout", "3m",
-		"--set", fmt.Sprintf("image.repository=%s", repo),
-		"--set", fmt.Sprintf("image.tag=%s", tag),
-		"--set", fmt.Sprintf("image.pullPolicy=%s", pullPolicy),
+	}
+
+	if !p.SkipImageSets {
+		args = append(args,
+			"--set", fmt.Sprintf("image.repository=%s", repo),
+			"--set", fmt.Sprintf("image.tag=%s", tag),
+			"--set", fmt.Sprintf("image.pullPolicy=%s", pullPolicy),
+		)
+	}
+
+	for _, set := range p.ExtraSets {
+		args = append(args, "--set", set)
 	}
 
 	if c.contextName != "" {

@@ -18,6 +18,7 @@ export default function ServicesPage() {
   const [slug, setSlug] = useState('');
   const [description, setDescription] = useState('');
   const [repo, setRepo] = useState('');
+  const [templateId, setTemplateId] = useState('go-api');
 
   async function load() {
     try {
@@ -71,13 +72,13 @@ export default function ServicesPage() {
 
     try {
       const result = await createServiceFromTemplate({
-        template_id: 'go-api',
+        template_id: templateId,
         ...buildInput(),
       });
 
       clearForm();
       setSuccess(
-        `Golden path created at ${result.generated_path} (${result.generated_files.length} files).`
+        `Golden path (${result.template_id}) created at ${result.generated_path} (${result.generated_files.length} files).`
       );
       await load();
     } catch (err) {
@@ -103,6 +104,11 @@ export default function ServicesPage() {
         </p>
 
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
+          <select value={templateId} onChange={e => setTemplateId(e.target.value)}>
+            <option value="go-api">go-api (stateless)</option>
+            <option value="postgres">postgres (StatefulSet)</option>
+            <option value="redis">redis (StatefulSet stub)</option>
+          </select>
           <input
             placeholder="Name"
             value={name}
@@ -131,7 +137,7 @@ export default function ServicesPage() {
 
         <div style={{ display: 'flex', gap: 8 }}>
           <button type="button" onClick={handleCreateFromTemplate}>
-            Create from golden path (go-api)
+            Create from golden path
           </button>
           <button type="button" onClick={handleRegisterOnly}>
             Register in catalog only
@@ -144,6 +150,7 @@ export default function ServicesPage() {
           <tr style={{ textAlign: 'left', borderBottom: '1px solid #ddd' }}>
             <th>Name</th>
             <th>Slug</th>
+            <th>Template</th>
             <th>Owner</th>
             <th></th>
           </tr>
@@ -153,6 +160,7 @@ export default function ServicesPage() {
             <tr key={s.id} style={{ borderBottom: '1px solid #eee' }}>
               <td>{s.name}</td>
               <td>{s.slug}</td>
+              <td>{s.template_id || 'go-api'}</td>
               <td>{s.owner_email}</td>
               <td>
                 <Link to={`/services/${s.id}`}>View</Link>

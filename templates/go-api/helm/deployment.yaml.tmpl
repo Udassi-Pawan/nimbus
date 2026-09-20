@@ -29,5 +29,34 @@ spec:
             httpGet:
               path: {{ "{{ .Values.probes.readinessPath }}" }}
               port: 8080
+          {{- "{{- if .Values.dependencies.postgres.enabled }}" }}
+          env:
+            - name: DATABASE_HOST
+              value: {{ "{{ .Values.dependencies.postgres.host | quote }}" }}
+            - name: DATABASE_PORT
+              value: {{ "{{ .Values.dependencies.postgres.port | quote }}" }}
+            - name: DATABASE_NAME
+              value: {{ "{{ .Values.dependencies.postgres.database | quote }}" }}
+            - name: DATABASE_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ "{{ .Values.dependencies.postgres.secretName }}" }}
+                  key: {{ "{{ .Values.dependencies.postgres.usernameKey }}" }}
+            - name: DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ "{{ .Values.dependencies.postgres.secretName }}" }}
+                  key: {{ "{{ .Values.dependencies.postgres.passwordKey }}" }}
+          {{- "{{- end }}" }}
+          {{- "{{- if and (not .Values.dependencies.postgres.enabled) .Values.dependencies.redis.enabled }}" }}
+          env:
+            - name: REDIS_ADDR
+              value: {{ "{{ printf \"%s:%v\" .Values.dependencies.redis.host .Values.dependencies.redis.port }}" }}
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ "{{ .Values.dependencies.redis.secretName }}" }}
+                  key: {{ "{{ .Values.dependencies.redis.passwordKey }}" }}
+          {{- "{{- end }}" }}
           resources:
             {{- "{{ toYaml .Values.resources | nindent 12 }}" }}

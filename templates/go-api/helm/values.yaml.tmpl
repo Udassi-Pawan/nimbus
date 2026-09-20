@@ -18,3 +18,18 @@ resources:
 probes:
   livenessPath: /health
   readinessPath: /health
+dependencies:
+  postgres:
+    enabled: false
+    host: ""
+    port: 5432
+    database: ""
+    secretName: ""
+    usernameKey: username
+    passwordKey: password
+  redis:
+    enabled: false
+    host: ""
+    port: 6379
+    secretName: ""
+    passwordKey: password

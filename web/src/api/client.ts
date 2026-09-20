@@ -54,7 +54,21 @@ export type ServiceEnvironment = {
   deployment_image: string;
   deployment_replicas_desired: number;
   deployment_replicas_ready: number;
+  storage_size?: string;
+  storage_class?: string;
+  secret_name?: string;
+  pvc_phase?: string;
   last_deployed_at?: string;
+  created_at: string;
+};
+
+export type ServiceDependency = {
+  id: string;
+  service_id: string;
+  depends_on_service_id: string;
+  depends_on_name?: string;
+  depends_on_slug?: string;
+  depends_on_template_id?: string;
   created_at: string;
 };
 
@@ -66,9 +80,12 @@ export type Service = {
   description: string;
   repository_url: string;
   owner_email: string;
+  template_id: string;
+  workload_type: string;
   created_at: string;
   updated_at: string;
   environments?: ServiceEnvironment[];
+  dependencies?: ServiceDependency[];
 };
 
 export type AuditLog = {
@@ -161,13 +178,15 @@ export type DeployServiceResponse = {
 
 export function deployService(
   serviceId: string,
-  input: { environment: string; image?: string }
+  input: { environment: string; image?: string; storage_size?: string; storage_class?: string }
 ) {
   return request<DeployServiceResponse>(`/api/v1/services/${serviceId}/deploy`, {
     method: 'POST',
     body: JSON.stringify({
       environment: input.environment,
       image: input.image ?? '',
+      storage_size: input.storage_size ?? '',
+      storage_class: input.storage_class ?? '',
     }),
   });
 }
@@ -223,4 +242,49 @@ export function checkConnectivity(
     method: 'POST',
     body: JSON.stringify(input),
   });
+}
+
+export type DataConnectionInfo = {
+  environment: string;
+  template_id: string;
+  host: string;
+  port: number;
+  database?: string;
+  username?: string;
+  secret_name: string;
+  password_key: string;
+  username_key: string;
+  database_key?: string;
+  pvc_phase: string;
+  endpoints_ready: number;
+};
+
+export function getDataConnection(serviceId: string, environment: string) {
+  const q = new URLSearchParams({ environment });
+  return request<DataConnectionInfo>(`/api/v1/services/${serviceId}/data-connection?${q}`);
+}
+
+export function listServiceDependencies(serviceId: string) {
+  return request<ServiceDependency[]>(`/api/v1/services/${serviceId}/dependencies`);
+}
+
+export function addServiceDependency(serviceId: string, dependsOnServiceId: string) {
+  return request<ServiceDependency>(`/api/v1/services/${serviceId}/dependencies`, {
+    method: 'POST',
+    body: JSON.stringify({ depends_on_service_id: dependsOnServiceId }),
+  });
+}
+
+export async function removeServiceDependency(serviceId: string, dependencyId: string) {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const token = getToken();
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  const res = await fetch(`${API_BASE}/api/v1/services/${serviceId}/dependencies/${dependencyId}`, {
+    method: 'DELETE',
+    headers,
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(body.error ?? `Request failed: ${res.status}`);
+  }
 }

@@ -26,8 +26,33 @@ type fileMapping struct {
 	OutputPath   string
 }
 
+func WorkloadTypeForTemplate(templateID string) string {
+	switch templateID {
+	case "postgres", "redis":
+		return "stateful"
+	default:
+		return "stateless"
+	}
+}
+
+func Generate(templateID, baseOutputDir, templateDir string, input ServiceTemplateInput) (GenerateResult, error) {
+	switch templateID {
+	case "go-api":
+		return generateWithMappings(templateID, baseOutputDir, templateDir, input, goAPIMappings())
+	case "postgres":
+		return generateWithMappings(templateID, baseOutputDir, templateDir, input, postgresMappings())
+	case "redis":
+		return generateWithMappings(templateID, baseOutputDir, templateDir, input, redisMappings())
+	default:
+		return GenerateResult{}, fmt.Errorf("unsupported template_id %q", templateID)
+	}
+}
+
 func GenerateGoAPI(baseOutputDir, templateDir string, input ServiceTemplateInput) (GenerateResult, error) {
-	const templateID = "go-api"
+	return Generate("go-api", baseOutputDir, templateDir, input)
+}
+
+func generateWithMappings(templateID, baseOutputDir, templateDir string, input ServiceTemplateInput, mappings []fileMapping) (GenerateResult, error) {
 	outputDir := filepath.Join(baseOutputDir, input.Slug)
 
 	if _, err := os.Stat(templateDir); err != nil {
@@ -36,20 +61,6 @@ func GenerateGoAPI(baseOutputDir, templateDir string, input ServiceTemplateInput
 
 	if err := os.MkdirAll(outputDir, 0o755); err != nil {
 		return GenerateResult{}, fmt.Errorf("create output dir: %w", err)
-	}
-
-	mappings := []fileMapping{
-		{"cmd_server_main.go.tmpl", "cmd/server/main.go"},
-		{"Dockerfile.tmpl", "Dockerfile"},
-		{"README.md.tmpl", "README.md"},
-		{"helm/Chart.yaml.tmpl", "helm/Chart.yaml"},
-		{"helm/values.yaml.tmpl", "helm/values.yaml"},
-		{"helm/deployment.yaml.tmpl", "helm/templates/deployment.yaml"},
-		{"helm/service.yaml.tmpl", "helm/templates/service.yaml"},
-		{"helm/ingress.yaml.tmpl", "helm/templates/ingress.yaml"},
-		{"kustomize/base/kustomization.yaml.tmpl", "kustomize/base/kustomization.yaml"},
-		{"kustomize/overlays/dev/kustomization.yaml.tmpl", "kustomize/overlays/dev/kustomization.yaml"},
-		{"github/ci.yml.tmpl", ".github/workflows/ci.yml"},
 	}
 
 	var written []string
@@ -85,4 +96,40 @@ func GenerateGoAPI(baseOutputDir, templateDir string, input ServiceTemplateInput
 		Files:      written,
 		TemplateID: templateID,
 	}, nil
+}
+
+func goAPIMappings() []fileMapping {
+	return []fileMapping{
+		{"cmd_server_main.go.tmpl", "cmd/server/main.go"},
+		{"Dockerfile.tmpl", "Dockerfile"},
+		{"README.md.tmpl", "README.md"},
+		{"helm/Chart.yaml.tmpl", "helm/Chart.yaml"},
+		{"helm/values.yaml.tmpl", "helm/values.yaml"},
+		{"helm/deployment.yaml.tmpl", "helm/templates/deployment.yaml"},
+		{"helm/service.yaml.tmpl", "helm/templates/service.yaml"},
+		{"helm/ingress.yaml.tmpl", "helm/templates/ingress.yaml"},
+		{"kustomize/base/kustomization.yaml.tmpl", "kustomize/base/kustomization.yaml"},
+		{"kustomize/overlays/dev/kustomization.yaml.tmpl", "kustomize/overlays/dev/kustomization.yaml"},
+		{"github/ci.yml.tmpl", ".github/workflows/ci.yml"},
+	}
+}
+
+func postgresMappings() []fileMapping {
+	return []fileMapping{
+		{"README.md.tmpl", "README.md"},
+		{"helm/Chart.yaml.tmpl", "helm/Chart.yaml"},
+		{"helm/values.yaml.tmpl", "helm/values.yaml"},
+		{"helm/statefulset.yaml.tmpl", "helm/templates/statefulset.yaml"},
+		{"helm/service.yaml.tmpl", "helm/templates/service.yaml"},
+	}
+}
+
+func redisMappings() []fileMapping {
+	return []fileMapping{
+		{"README.md.tmpl", "README.md"},
+		{"helm/Chart.yaml.tmpl", "helm/Chart.yaml"},
+		{"helm/values.yaml.tmpl", "helm/values.yaml"},
+		{"helm/statefulset.yaml.tmpl", "helm/templates/statefulset.yaml"},
+		{"helm/service.yaml.tmpl", "helm/templates/service.yaml"},
+	}
 }

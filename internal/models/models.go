@@ -32,22 +32,29 @@ type Service struct {
 	Description   string               `json:"description"`
 	RepositoryURL string               `json:"repository_url"`
 	OwnerEmail    string               `json:"owner_email"`
+	TemplateID    string               `json:"template_id"`
+	WorkloadType  string               `json:"workload_type"`
 	CreatedAt     time.Time            `json:"created_at"`
 	UpdatedAt     time.Time            `json:"updated_at"`
 	Environments  []ServiceEnvironment `json:"environments,omitempty"`
+	Dependencies  []ServiceDependency  `json:"dependencies,omitempty"`
 }
 
 type ServiceEnvironment struct {
-	ID                      string     `json:"id"`
-	ServiceID               string     `json:"service_id"`
-	Name                    string     `json:"name"`
-	Namespace               string     `json:"namespace"`
-	DeploymentStatus        string     `json:"deployment_status"`
-	DeploymentImage         string     `json:"deployment_image"`
-	DeploymentReplicasDesired int      `json:"deployment_replicas_desired"`
-	DeploymentReplicasReady   int      `json:"deployment_replicas_ready"`
-	LastDeployedAt          *time.Time `json:"last_deployed_at,omitempty"`
-	CreatedAt               time.Time  `json:"created_at"`
+	ID                        string     `json:"id"`
+	ServiceID                 string     `json:"service_id"`
+	Name                      string     `json:"name"`
+	Namespace                 string     `json:"namespace"`
+	DeploymentStatus          string     `json:"deployment_status"`
+	DeploymentImage           string     `json:"deployment_image"`
+	DeploymentReplicasDesired int        `json:"deployment_replicas_desired"`
+	DeploymentReplicasReady   int        `json:"deployment_replicas_ready"`
+	StorageSize               string     `json:"storage_size"`
+	StorageClass              string     `json:"storage_class"`
+	SecretName                string     `json:"secret_name"`
+	PVCPhase                  string     `json:"pvc_phase"`
+	LastDeployedAt            *time.Time `json:"last_deployed_at,omitempty"`
+	CreatedAt                 time.Time  `json:"created_at"`
 }
 
 type CreateServiceInput struct {
@@ -57,7 +64,38 @@ type CreateServiceInput struct {
 	Description   string   `json:"description"`
 	RepositoryURL string   `json:"repository_url"`
 	OwnerEmail    string   `json:"owner_email"`
+	TemplateID    string   `json:"template_id"`
+	WorkloadType  string   `json:"workload_type"`
 	Environments  []string `json:"environments"`
+}
+
+type ServiceDependency struct {
+	ID                 string    `json:"id"`
+	ServiceID          string    `json:"service_id"`
+	DependsOnServiceID string    `json:"depends_on_service_id"`
+	DependsOnName      string    `json:"depends_on_name,omitempty"`
+	DependsOnSlug      string    `json:"depends_on_slug,omitempty"`
+	DependsOnTemplate  string    `json:"depends_on_template_id,omitempty"`
+	CreatedAt          time.Time `json:"created_at"`
+}
+
+type AddServiceDependencyInput struct {
+	DependsOnServiceID string `json:"depends_on_service_id"`
+}
+
+type DataConnectionResponse struct {
+	Environment  string `json:"environment"`
+	TemplateID   string `json:"template_id"`
+	Host         string `json:"host"`
+	Port         int32  `json:"port"`
+	Database     string `json:"database,omitempty"`
+	Username     string `json:"username,omitempty"`
+	SecretName   string `json:"secret_name"`
+	PasswordKey  string `json:"password_key"`
+	UsernameKey  string `json:"username_key"`
+	DatabaseKey  string `json:"database_key,omitempty"`
+	PVCPhase     string `json:"pvc_phase"`
+	EndpointsReady int  `json:"endpoints_ready"`
 }
 
 type LoginInput struct {
@@ -98,8 +136,10 @@ type CreateFromTemplateResponse struct {
 }
 
 type DeployServiceInput struct {
-	Environment string `json:"environment"`
-	Image       string `json:"image"`
+	Environment  string `json:"environment"`
+	Image        string `json:"image"`
+	StorageSize  string `json:"storage_size"`
+	StorageClass string `json:"storage_class"`
 }
 
 type SyncDeploymentInput struct {
